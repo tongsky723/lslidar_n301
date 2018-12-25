@@ -10,6 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_ros
   pcl_conversions
   lslidar_n301_msgs
+        PCL
 )
 find_package(Boost REQUIRED)
 
@@ -29,11 +30,15 @@ include_directories(
   include
   ${Boost_INCLUDE_DIR}
   ${catkin_INCLUDE_DIRS}
+        ${PCL_INCLUDE_DIRS}
 )
 
 link_directories(
   ${catkin_LIBRARY_DIRS}
+        ${PCL_INCLUDE_DIRS}
 )
+
+add_definitions(${PCL_DEFINITIONS})
 
 # Lslidar N301 Decoder
 add_library(lslidar_n301_decoder
@@ -60,7 +65,7 @@ add_dependencies(lslidar_n301_decoder_node
   ${catkin_EXPORTED_TARGETS}
 )
 
-install(TARGETS lslidar_n301_decoder_node
+install(TARGETS lslidar_n301_decoder_node lslidar_n301_decoder
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

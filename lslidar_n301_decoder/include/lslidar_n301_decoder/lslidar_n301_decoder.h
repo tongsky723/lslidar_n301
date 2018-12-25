@@ -25,6 +25,7 @@
 #include <vector>
 #include <string>
 #include <boost/shared_ptr.hpp>
+#include "time.h"
 
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -114,6 +115,13 @@ typedef struct{
     double intensity;
 }point_struct;
 
+struct PointXYZIT {
+    PCL_ADD_POINT4D;
+    uint8_t intensity;
+    double timestamp;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW  // make sure our new allocators are aligned
+} EIGEN_ALIGN16;
+
 class LslidarN301Decoder {
 public:
 
@@ -142,11 +150,13 @@ private:
 
     struct RawPacket {
         RawBlock blocks[BLOCKS_PER_PACKET];
-        uint32_t time_stamp;
+        // uint32_t time_stamp;
+        uint8_t time_stamp_yt[4];
         uint8_t factory[2];
         //uint16_t revolution;
         //uint8_t status[PACKET_STATUS_SIZE];
     };
+
 
     struct Firing {
         // Azimuth associated with the first shot within this firing.
@@ -185,9 +195,21 @@ private:
 
     // calc the means_point
     point_struct getMeans(std::vector<point_struct> clusters);
+    
+    //get gps_base time
+    uint64_t get_gps_stamp(tm t);
+    tm pTime;            
+    
+    uint64_t packet_timestamp;
+
+    // time relavated variables
+    uint64_t sweep_end_time_gps;
+    uint64_t sweep_end_time_hardware;
 
     // configuration degree base
     int point_num;
+    int skip_num;
+    double invalid_radius;
     double angle_base;
 
     // Configuration parameters
@@ -197,6 +219,7 @@ private:
     double angle_disable_max;
     double frequency;
     bool publish_point_cloud;
+    bool use_gps_ts;
 
     double cos_azimuth_table[6300];
     double sin_azimuth_table[6300];
@@ -222,11 +245,23 @@ private:
     ros::Publisher point_cloud_pub;
     ros::Publisher scan_pub;
 
+    std::vector<int> disable_angle_max_range_;
+    std::vector<int> disable_angle_min_range_;
+    int disable_angle_tolerance_;
+    int truncated_mode_;
+
 };
 
 typedef LslidarN301Decoder::LslidarN301DecoderPtr LslidarN301DecoderPtr;
 typedef LslidarN301Decoder::LslidarN301DecoderConstPtr LslidarN301DecoderConstPtr;
+typedef PointXYZIT VPoint;
+typedef pcl::PointCloud<VPoint> VPointCloud;
 
 } // end namespace lslidar_n301_decoder
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(lslidar_n301_decoder::PointXYZIT,
+                                  (float, x, x)(float, y, y)(float, z, z)(
+                                          uint8_t, intensity,
+                                          intensity)(double, timestamp, timestamp))
 
 #endif

@@ -1,0 +1,4 @@
+disable_min: [0, 30, 60, 90]
+disable_max: [10, 40, 70, 180]
+disable_tolerance: 5
+truncated_mode: 1 # 1 :truncated laser with specific ranges; 2 truncate laser data with radius limits

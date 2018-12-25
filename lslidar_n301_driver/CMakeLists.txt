@@ -60,7 +60,7 @@ add_dependencies(lslidar_n301_driver_node
 )
 
 # install options
-install(TARGETS lslidar_n301_driver_node
+install(TARGETS lslidar_n301_driver_node lslidar_n301_driver
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

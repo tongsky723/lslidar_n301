@@ -25,28 +25,60 @@ LslidarN301Decoder::LslidarN301Decoder(
     nh(n),
     pnh(pn),
     publish_point_cloud(true),
+    use_gps_ts(false),
     is_first_sweep(true),
     last_azimuth(0.0),
     sweep_start_time(0.0),
     packet_start_time(0.0),
+    skip_num(0.0),
     sweep_data(new lslidar_n301_msgs::LslidarN301Sweep()){
     return;
 }
 
 bool LslidarN301Decoder::loadParameters() {
     pnh.param<int>("point_num", point_num, 1000);
+    pnh.param<int>("skip_num", skip_num, 0);
+    pnh.param<double>("invalid_radius", invalid_radius, 0);
     pnh.param<double>("min_range", min_range, 0.5);
     pnh.param<double>("max_range", max_range, 100.0);
     pnh.param<double>("angle_disable_min", angle_disable_min,-1);
     pnh.param<double>("angle_disable_max", angle_disable_max, -1);
 
     pnh.param<double>("frequency", frequency, 20.0);
-    pnh.param<bool>("publish_point_cloud", publish_point_cloud, true);
-
+    pnh.param<bool>("publish_point_cloud", publish_point_cloud, false);
+    pnh.param<bool>("use_gps_ts", use_gps_ts, false);
     pnh.param<string>("fixed_frame_id", fixed_frame_id, "map");
     pnh.param<string>("child_frame_id", child_frame_id, "lslidar");
 
     angle_base = M_PI*2 / point_num;
+
+    ROS_WARN("Using GPS timestamp or not %d", use_gps_ts);
+    ROS_WARN("Skip %d laser points", skip_num);
+
+    std::vector<int> disable_angle_min_range, disable_angle_max_range, disable_angle_range_default;
+//    disable_angle_range_default.push_back(-1.0);
+    pnh.param<std::vector<int>>("disable_min", disable_angle_min_range, disable_angle_range_default);
+    pnh.param<std::vector<int>>("disable_max", disable_angle_max_range, disable_angle_range_default);
+    int disable_tolerance;
+    pnh.param<int>("disable_tolerance", disable_tolerance, 5);
+    pnh.param<int>("truncated_mode", truncated_mode_, 1);
+
+    if (truncated_mode_ == 1)
+        ROS_INFO("truncated mode is specific angle ranges");
+    else if (truncated_mode_ == 2)
+        ROS_INFO("truncated mode is radius limits");
+
+    ROS_INFO("disable angle tolerance is %d", disable_tolerance);
+
+    disable_angle_tolerance_ = disable_tolerance * point_num / 360;
+
+    for(unsigned i=0; i < disable_angle_min_range.size(); i++) {
+        ROS_INFO("truncated angle min is %d", disable_angle_min_range[i]);
+        ROS_INFO("truncated angle max is %d", disable_angle_max_range[i]);
+        disable_angle_min_range_.push_back(disable_angle_min_range[i]);
+        disable_angle_max_range_.push_back(disable_angle_max_range[i]);
+    }
+
     return true;
 }
 
@@ -101,8 +133,11 @@ bool LslidarN301Decoder::checkPacketValidity(const RawPacket* packet) {
 }
 
 void LslidarN301Decoder::publishPointCloud() {
-    pcl::PointCloud<pcl::PointXYZI>::Ptr point_cloud(
-                new pcl::PointCloud<pcl::PointXYZI>());
+//    pcl::PointCloud<pcl::PointXYZI>::Ptr point_cloud(
+//                new pcl::PointCloud<pcl::PointXYZI>());
+
+    VPointCloud::Ptr point_cloud(new VPointCloud());
+    double timestamp = sweep_data->header.stamp.toSec();
     point_cloud->header.stamp =
             pcl_conversions::toPCL(sweep_data->header).stamp;
     point_cloud->header.frame_id = child_frame_id;
@@ -118,7 +153,8 @@ void LslidarN301Decoder::publishPointCloud() {
         size_t j;
         for (j = 1; j < scan.points.size()-1; ++j) {
 
-            pcl::PointXYZI point;
+            VPoint point;
+            point.timestamp = timestamp - (scan.points.size()-1 - j)*0.05;
             point.x = scan.points[j].x;
             point.y = scan.points[j].y;
             point.z = scan.points[j].z;
@@ -144,40 +180,71 @@ void LslidarN301Decoder::publishScan()
 
     if(sweep_data->scans[0].points.size() <= 1)
         return;
+//    time_t tick = (time_t) sweep_end_time_gps;
+//    struct tm tm;
+//    tm = *localtime(&tick);
 
     scan->header.frame_id = child_frame_id;
-    scan->header.stamp = sweep_data->header.stamp;
-
+    scan->header.stamp = sweep_data->header.stamp;  // timestamp will obtained from sweep data stamp
     scan->angle_min = 0.0;
     scan->angle_max = 2.0*M_PI;
-    scan->angle_increment = (scan->angle_max - scan->angle_min)/point_num;
+    scan->angle_increment = (scan->angle_max - scan->angle_min)/ point_num * (skip_num+1);
 
-    //	scan->time_increment = motor_speed_/1e8;
+//  IF following two lines are not comment out will cause TF error in Rviz
+    scan->time_increment = 0.0;  //s
+    scan->scan_time = 0.0;  //s
+
     scan->range_min = min_range;
     scan->range_max = max_range;
-    scan->ranges.reserve(point_num);
-    scan->ranges.assign(point_num, std::numeric_limits<float>::infinity());
 
-    scan->intensities.reserve(point_num);
-    scan->intensities.assign(point_num, std::numeric_limits<float>::infinity());
+    std::vector<double> origin_ranges, origin_intensity;
+    origin_ranges.reserve(point_num);
+    origin_intensity.reserve(point_num);
+    origin_ranges.assign(point_num, std::numeric_limits<float>::infinity());
+    origin_intensity.assign(point_num, std::numeric_limits<float>::infinity());
 
     for(uint16_t i = 0; i < sweep_data->scans[0].points.size(); i++)
     {
         int point_idx = sweep_data->scans[0].points[i].azimuth / angle_base;
 
-        if (point_idx >= point_num)
-            point_idx = 0;
-        if (point_idx < 0)
-            point_idx = point_num - 1;
-
-        scan->ranges[point_num - 1-point_idx] = sweep_data->scans[0].points[i].distance;
-        scan->intensities[point_num - 1-point_idx] = sweep_data->scans[0].points[i].intensity;
+        int idx = point_num-point_idx-1;
+        if (idx >= point_num)
+            idx = 0;
+        if (idx < 0)
+            idx = point_num - 1;
+        origin_ranges[idx] = sweep_data->scans[0].points[i].distance;
+        origin_intensity[idx] = sweep_data->scans[0].points[i].intensity;
     }
 
-    for (int i = point_num - 1; i >= 0; i--)
+    for (int i = 0; i < point_num; i++)
 	{
-		if((i >= angle_disable_min*point_num/360) && (i < angle_disable_max*point_num/360))
-			scan->ranges[i] = std::numeric_limits<float>::infinity();
+		if((i >= angle_disable_min*point_num/360) && (i <= angle_disable_max*point_num/360))
+        {
+            origin_ranges[i] = std::numeric_limits<float>::infinity();
+        }
+
+        if (truncated_mode_ == 1) {
+            for (int j = 0; j < disable_angle_max_range_.size(); ++j) {
+                if ((i >= (disable_angle_min_range_[j] * point_num / 360 - disable_angle_tolerance_)) &&
+                    (i <= (disable_angle_max_range_[j] * point_num / 360 + disable_angle_tolerance_))) {
+                    ROS_DEBUG("truncate this idx %d under range from %d to %d", i, disable_angle_min_range_[j], disable_angle_max_range_[j]);
+                    origin_ranges[i] = std::numeric_limits<float>::infinity();
+                }
+                ROS_DEBUG("this idx %d under range from %d to %d", i, disable_angle_min_range_[j]* point_num / 360, disable_angle_max_range_[j]* point_num / 360);
+            }
+        }
+        else if (truncated_mode_ == 2) {
+            if (origin_ranges[i] <= invalid_radius) {
+                origin_ranges[i] = std::numeric_limits<float>::infinity();
+            }
+        }
+
+        if ((i % (skip_num+1)) == 0)
+        {
+            scan->ranges.push_back(origin_ranges[i]);
+            scan->intensities.push_back(origin_intensity[i]);
+        }
+
 	}
 
     scan_pub.publish(scan);
@@ -210,8 +277,16 @@ point_struct LslidarN301Decoder::getMeans(std::vector<point_struct> clusters)
     return tmp;
 }
 
-void LslidarN301Decoder::decodePacket(const RawPacket* packet) {
+ uint64_t LslidarN301Decoder::get_gps_stamp(struct tm t){
 
+  //uint64_t ptime =mktime(&t)*1e6;
+//    ROS_INFO("get_gps_stamp : %d-%d-%d %d:%d:%d", t.tm_year, t.tm_mon,
+        //    t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
+   uint64_t ptime =static_cast<uint64_t>(timegm(&t));
+   return ptime;
+}
+
+void LslidarN301Decoder::decodePacket(const RawPacket* packet) {
     // Compute the azimuth angle for each firing.
     for (size_t fir_idx = 0; fir_idx < FIRINGS_PER_PACKET; fir_idx+=2) {
         size_t blk_idx = fir_idx / 2;
@@ -235,7 +310,7 @@ void LslidarN301Decoder::decodePacket(const RawPacket* packet) {
         azimuth_diff = azimuth_diff < 0 ? azimuth_diff + 2*M_PI : azimuth_diff;
 
         firings[fir_idx].firing_azimuth =
-                firings[fir_idx-1].firing_azimuth + azimuth_diff/2.0;
+                firings[fir_idx-1].firing_azimuth + azimuth_diff/2.0; 
 
 
         firings[fir_idx].firing_azimuth  =
@@ -250,8 +325,8 @@ void LslidarN301Decoder::decodePacket(const RawPacket* packet) {
         for (size_t blk_fir_idx = 0; blk_fir_idx < FIRINGS_PER_BLOCK; ++blk_fir_idx){
             size_t fir_idx = blk_idx*FIRINGS_PER_BLOCK + blk_fir_idx;
 
-            double azimuth_diff = 0.0;
-            if (fir_idx < FIRINGS_PER_PACKET - 1)
+            double azimuth_diff = 0.0;  
+            if (fir_idx < FIRINGS_PER_PACKET - 1)              
                 azimuth_diff = firings[fir_idx+1].firing_azimuth -
                         firings[fir_idx].firing_azimuth;
             else
@@ -276,13 +351,28 @@ void LslidarN301Decoder::decodePacket(const RawPacket* packet) {
                 // Intensity
                 firings[fir_idx].intensity[scan_fir_idx] = static_cast<double>(
                             raw_block.data[byte_idx+2]);
+        
+       
             }
+
+                 //extract gps_time
+            pTime.tm_year = raw_block.data[90]+2000-1900;
+            pTime.tm_mon = raw_block.data[91]-1;
+            pTime.tm_mday = raw_block.data[92];
+            pTime.tm_hour = raw_block.data[93];
+            pTime.tm_min = raw_block.data[94];
+            pTime.tm_sec = raw_block.data[95];
+                 
         }
+          
     }
-    // for (size_t fir_idx = 0; fir_idx < FIRINGS_PER_PACKET; ++fir_idx)
-    //{
-    //	ROS_WARN("[%f %f %f]", firings[fir_idx].azimuth[0], firings[fir_idx].distance[0], firings[fir_idx].intensity[0]);
-    //}
+
+    // resolve the timestamp in the end of packet
+    packet_timestamp = (packet->time_stamp_yt[0]  + 
+                        packet->time_stamp_yt[1] * pow(2, 8) +
+                        packet->time_stamp_yt[2] * pow(2, 16) + 
+                        packet->time_stamp_yt[3] * pow(2, 24)) * 1e3;
+//    ROS_DEBUG("nsec part: %lu", packet_timestamp);
     return;
 }
 
@@ -292,15 +382,15 @@ void LslidarN301Decoder::packetCallback(
     // Convert the msg to the raw packet type.
     const RawPacket* raw_packet = (const RawPacket*) (&(msg->data[0]));
 
-    // Check if the packet is valid
+    // Check if the packet is valid+
     if (!checkPacketValidity(raw_packet)) return;
 
     // Decode the packet
     decodePacket(raw_packet);
-
+    
     // Find the start of a new revolution
     //    If there is one, new_sweep_start will be the index of the start firing,
-    //    otherwise, new_sweep_start will be FIRINGS_PER_PACKET.
+    //    otherwise, new_sweep_start will be FIRINGS_PER_PACKET. FIRINGS_PER_PACKET = 24
     size_t new_sweep_start = 0;
     do {
         //    if (firings[new_sweep_start].firing_azimuth < last_azimuth) break;
@@ -326,8 +416,9 @@ void LslidarN301Decoder::packetCallback(
             is_first_sweep = false;
             start_fir_idx = new_sweep_start;
             end_fir_idx = FIRINGS_PER_PACKET;
-            sweep_start_time = msg->stamp.toSec() +
-                    FIRING_TOFFSET * (end_fir_idx-start_fir_idx) * 1e-6;
+            // sweep_start_time = msg->stamp.toSec() +
+                    // FIRING_TOFFSET * (end_fir_idx-start_fir_idx) * 1e-6;
+            sweep_start_time = get_gps_stamp(pTime);
         }
     }
 
@@ -361,8 +452,11 @@ void LslidarN301Decoder::packetCallback(
             double z_coord = z;
 
             // Compute the time of the point
-            double time = packet_start_time +
-                    FIRING_TOFFSET*fir_idx + DSR_TOFFSET*scan_idx;
+            // double time = packet_start_time +
+                    // FIRING_TOFFSET*fir_idx + DSR_TOFFSET*scan_idx;
+
+            // get timestamp from gps and hardware instead
+            double time = sweep_end_time_gps*1.0 + sweep_end_time_hardware*1e-9;
 
             // Remap the index of the scan
             int remapped_scan_idx = scan_idx%2 == 0 ? scan_idx/2 : scan_idx/2+8;
@@ -390,20 +484,30 @@ void LslidarN301Decoder::packetCallback(
     if (end_fir_idx != FIRINGS_PER_PACKET) {
         //	ROS_WARN("A new sweep begins");
         // Publish the last revolution
+        sweep_end_time_gps = get_gps_stamp(pTime);
+        sweep_end_time_hardware = packet_timestamp;
+
         sweep_data->header.frame_id = "sweep";
-        sweep_data->header.stamp = ros::Time(sweep_start_time);
+        if (use_gps_ts){
+            sweep_data->header.stamp = ros::Time(sweep_end_time_gps, sweep_end_time_hardware);
+        }
+        else{
+            sweep_data->header.stamp = ros::Time::now();
+        }
 
         sweep_pub.publish(sweep_data);
 
         if (publish_point_cloud) publishPointCloud();
+        
         publishScan();
 
         sweep_data = lslidar_n301_msgs::LslidarN301SweepPtr(
                     new lslidar_n301_msgs::LslidarN301Sweep());
 
         // Prepare the next revolution
-        sweep_start_time = msg->stamp.toSec() +
-                FIRING_TOFFSET * (end_fir_idx-start_fir_idx) * 1e-6;
+        // sweep_start_time = msg->stamp.toSec() +
+        //         FIRING_TOFFSET * (end_fir_idx-start_fir_idx) * 1e-6;
+        sweep_start_time = sweep_end_time_gps * 1.0 + sweep_end_time_hardware*1e-9;
 
         packet_start_time = 0.0;
         last_azimuth = firings[FIRINGS_PER_PACKET-1].firing_azimuth;
@@ -441,8 +545,11 @@ void LslidarN301Decoder::packetCallback(
                 double z_coord = z;
 
                 // Compute the time of the point
-                double time = packet_start_time +
-                        FIRING_TOFFSET*(fir_idx-start_fir_idx) + DSR_TOFFSET*scan_idx;
+                // double time = packet_start_time +
+                        // FIRING_TOFFSET*(fir_idx-start_fir_idx) + DSR_TOFFSET*scan_idx;
+
+                // get timestamp from gps and hardware instead
+                double time = sweep_end_time_gps*1.0 + sweep_end_time_hardware*1e-9;
 
                 // Remap the index of the scan
                 int remapped_scan_idx = scan_idx%2 == 0 ? scan_idx/2 : scan_idx/2+8;
@@ -471,3 +578,4 @@ void LslidarN301Decoder::packetCallback(
 
 } // end namespace lslidar_n301_decoder
 
+    //	ROS_WARN("[%f %f %f]", firings[fir_idx].azimuth[0], firings[fir_idx].distance[0], firings[fir_idx].intensity[0]);

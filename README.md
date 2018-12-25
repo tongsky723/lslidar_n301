@@ -72,6 +72,10 @@ Note that this launch file launches both the driver and the decoder, which is th
 ## FAQ
 
 
+## Bug Report
+
+Prefer to open an issue. You can also send an E-mail to shaohuashu@lslidar.com
+
 
 
 
