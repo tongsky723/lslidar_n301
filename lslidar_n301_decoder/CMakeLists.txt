@@ -10,7 +10,6 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_ros
   pcl_conversions
   lslidar_n301_msgs
-        PCL
 )
 find_package(Boost REQUIRED)
 
@@ -30,12 +29,10 @@ include_directories(
   include
   ${Boost_INCLUDE_DIR}
   ${catkin_INCLUDE_DIRS}
-        ${PCL_INCLUDE_DIRS}
 )
 
 link_directories(
   ${catkin_LIBRARY_DIRS}
-        ${PCL_INCLUDE_DIRS}
 )
 
 add_definitions(${PCL_DEFINITIONS})
