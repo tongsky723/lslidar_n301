@@ -24,6 +24,7 @@
     <param name="frequency" value="10.0"/>
     <param name="publish_point_cloud" value="false"/>
     <remap from="/scan" to="$(arg scan_topic)"/>
+<rosparam file="$(find lslidar_n301_decoder)/launch/includes/disable_angle.yaml" command="load"/>
   </node>
 
 </launch>

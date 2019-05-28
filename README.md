@@ -70,19 +70,19 @@ catkin_make
 	Set ranges data to 0 when its corresponding angle larger than this value 
 
 - `truncated_mode` (`int`, '0') 
-	Using which method to truncate laser data, 0 is cut off specific angle ranges ; 1 is cut off certain radius range
+	Using which method to truncate laser data, 1 is cut off specific angle ranges ; 2 is cut off certain radius range; else won't do anything to scan
 
 - `invalid_radius` (`double`, `0.0`)
-	Useful when setting truncated_mode to 1. All ranges data within this radius will set to infinity
+	Useful when setting truncated_mode to 2. All ranges data within this radius will set to infinity
 
 - `disable_min` (`list`, `[]`)
-	Useful when setting truncated_mode to 0. All ranges data between disable_min and disable_max will set to infinity
+	Useful when setting truncated_mode to 1. All ranges data between disable_min and disable_max will set to infinity
 
 - `disable_min` (`list`, `[]`)
-	Useful when setting truncated_mode to 0. All ranges data between disable_min and disable_max will set to infinity
+	Useful when setting truncated_mode to 1. All ranges data between disable_min and disable_max will set to infinity
 
 - `disable_tolerance` (`int`, `5`)
-	Useful when setting truncated_mode to 0. disable_min and disable_max can be expand with this tolerance
+	Useful when setting truncated_mode to 1. disable_min and disable_max can be expand with this tolerance
 
 ### Published Topics
 

@@ -205,7 +205,12 @@ void LslidarN301Decoder::publishScan()
 
     for(uint16_t i = 0; i < sweep_data->scans[0].points.size(); i++)
     {
-        int point_idx = sweep_data->scans[0].points[i].azimuth / angle_base;
+        double point_azimuth = sweep_data->scans[0].points[i].azimuth;
+        int point_idx = point_azimuth / angle_base;
+        if (fmod(point_azimuth, angle_base) > (angle_base/2.0))
+        {
+            point_idx ++;
+        }
 
         int idx = point_num-point_idx-1;
         if (idx >= point_num)
@@ -225,12 +230,12 @@ void LslidarN301Decoder::publishScan()
 
         if (truncated_mode_ == 1) {
             for (int j = 0; j < disable_angle_max_range_.size(); ++j) {
-                if ((i >= (disable_angle_min_range_[j] * point_num / 360 - disable_angle_tolerance_)) &&
-                    (i <= (disable_angle_max_range_[j] * point_num / 360 + disable_angle_tolerance_))) {
-                    ROS_DEBUG("truncate this idx %d under range from %d to %d", i, disable_angle_min_range_[j], disable_angle_max_range_[j]);
+                if ((i >= ((disable_angle_min_range_[j]  * point_num / 360 )- disable_angle_tolerance_)) &&
+                    (i <= ((disable_angle_max_range_[j]  * point_num / 360) + disable_angle_tolerance_))) {
+//                    ROS_DEBUG("truncate this idx %d under range from %d to %d", i, disable_angle_min_range_[j], disable_angle_max_range_[j]);
                     origin_ranges[i] = std::numeric_limits<float>::infinity();
                 }
-                ROS_DEBUG("this idx %d under range from %d to %d", i, disable_angle_min_range_[j]* point_num / 360, disable_angle_max_range_[j]* point_num / 360);
+//                ROS_DEBUG("this idx %d under range from %d to %d", i, disable_angle_min_range_[j]* point_num / 360, disable_angle_max_range_[j]* point_num / 360);
             }
         }
         else if (truncated_mode_ == 2) {
